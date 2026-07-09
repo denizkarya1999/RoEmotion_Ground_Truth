@@ -1,0 +1,6 @@
+# Python packages used by app.py.
+numpy>=1.24
+sounddevice>=0.4.6
+
+# Linux also needs the native PortAudio library:
+# sudo apt install libportaudio2 portaudio19-dev

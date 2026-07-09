@@ -1,0 +1,118 @@
+Measurement citations used in this project
+==========================================
+
+This project uses a transparent measurement-based heuristic instead of a
+trained emotion-recognition model. The app measures microphone loudness in
+dBFS, averages the adjusted loudness over a 32-second window, and maps that
+window average to broad emotion labels.
+
+Measurement applied in the code:
+
+- below -55 dBFS: very quiet / unclear
+- -55 to -42 dBFS: quiet / calm
+- -42 to -30 dBFS: moderate / active
+- -30 to 0 dBFS: loud / stressed or excited
+- prediction window: 32 seconds
+
+Important limitation:
+
+The papers below support using vocal loudness, energy, and intensity as
+emotion-related acoustic cues, and they support using time windows for signal
+measurement. They do not validate these exact dBFS threshold numbers as a
+clinical or universal emotion detector. The thresholds are simple project
+heuristics for the selected microphone and input gain.
+
+
+Digital decibel measurement
+---------------------------
+
+1. Library of Congress, Federal Agencies Digital Guidelines Initiative.
+   Decibels relative to full scale.
+   URL: https://www.digitizationguidelines.gov/term.php?term=decibelsrelativetofullscale
+
+   Used for: defining the app's dBFS measurement scale. The code computes
+   20 * log10(RMS amplitude), where 0 dBFS is digital full scale and quieter
+   input has negative values. These readings are relative to the computer's
+   microphone signal, not calibrated real-world dBA sound-pressure levels.
+
+
+Decibels, loudness, and vocal emotion cues
+------------------------------------------
+
+2. Banse, R., & Scherer, K. R. (1996). Acoustic profiles in vocal emotion
+   expression. Journal of Personality and Social Psychology, 70(3), 614-636.
+   DOI: 10.1037/0022-3514.70.3.614
+   URL: https://www.columbia.edu/~rmk7/HC/HC_Readings/Scherer.pdf
+
+   Used for: supporting the idea that measurable vocal acoustic parameters,
+   including intensity-related cues, differ across emotional expressions. This
+   is the closest citation for correlating voice tone/loudness measurements with
+   emotion-related categories.
+
+3. Juslin, P. N., & Laukka, P. (2003). Communication of emotions in vocal
+   expression and music performance: Different channels, same code?
+   Psychological Bulletin, 129(5), 770-814.
+   DOI: 10.1037/0033-2909.129.5.770
+   URL: https://pubmed.ncbi.nlm.nih.gov/12956543/
+
+   Used for: reviewing many studies showing that emotion in voice is expressed
+   through acoustic cues. This supports using voice intensity/loudness as one
+   cue for broad arousal differences, while reminding us that loudness alone is
+   not enough for reliable emotion classification.
+
+4. Ververidis, D., & Kotropoulos, C. (2006). Emotional speech recognition:
+   Resources, features, and methods. Speech Communication, 48(9), 1162-1181.
+   DOI: 10.1016/j.specom.2006.04.003
+   URL: https://www.sciencedirect.com/science/article/abs/pii/S0167639306000422
+
+   Used for: connecting speech emotion recognition with measurable acoustic
+   features, including speech-signal intensity. This supports the app's choice
+   to use a loudness/energy measurement as a simple emotion-related cue.
+
+5. El Ayadi, M., Kamel, M. S., & Karray, F. (2011). Survey on speech emotion
+   recognition: Features, classification schemes, and databases. Pattern
+   Recognition, 44(3), 572-587.
+   DOI: 10.1016/j.patcog.2010.09.020
+   URL: https://www.sciencedirect.com/science/article/abs/pii/S0031320310004619
+
+   Used for: supporting the use of acoustic features such as energy and pitch in
+   speech emotion recognition. The app uses only the energy/loudness side of
+   this feature family.
+
+6. Eyben, F., Scherer, K. R., Schuller, B. W., Sundberg, J., Andre, E.,
+   Busso, C., Devillers, L. Y., Epps, J., Laukka, P., Narayanan, S. S., &
+   Truong, K. P. (2016). The Geneva Minimalistic Acoustic Parameter Set
+   (GeMAPS) for Voice Research and Affective Computing. IEEE Transactions on
+   Affective Computing, 7(2), 190-202.
+   DOI: 10.1109/TAFFC.2015.2457417
+   URL: https://dl.acm.org/doi/10.1109/TAFFC.2015.2457417
+
+   Used for: showing that standardized voice feature sets for affective
+   computing include loudness-related measurements. This supports measuring
+   voice loudness as a legitimate input feature, even though this project uses a
+   much simpler rule-based threshold method.
+
+
+32-second emotion detection window
+----------------------------------
+
+7. Karlen, W., Raman, S., Ansermino, J. M., & Dumont, G. A. (2013).
+   Multiparameter respiratory rate estimation from the photoplethysmogram.
+   IEEE Transactions on Biomedical Engineering, 60(7), 1946-1953.
+   DOI: 10.1109/TBME.2013.2246160
+   URL: https://pubmed.ncbi.nlm.nih.gov/23399950/
+
+   Used for: supporting the idea of using a 32-second window when measuring
+   breathing-related signals. This project uses a 32-second window to average
+   microphone dBFS values before assigning an emotion label.
+
+8. Jarchi, D., Salvi, D., Tarassenko, L., & Clifton, D. A. (2018). Validation
+   of Instantaneous Respiratory Rate Using Reflectance PPG from Different Body
+   Positions. Sensors, 18(11), 3705.
+   DOI: 10.3390/s18113705
+   URL: https://www.mdpi.com/1424-8220/18/11/3705
+
+   Used for: documenting that respiratory-rate measurement methods often use
+   windowed segments with a minimum of about 32 seconds. The app applies the
+   same window length as a stable period for deciding the emotion category from
+   averaged decibel readings.
