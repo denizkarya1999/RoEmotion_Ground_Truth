@@ -1,0 +1,16 @@
+HEALTHY RESTING HEART-RATE REFERENCE
+
+American Heart Association. "All About Heart Rate (Pulse)."
+https://www.heart.org/en/health-topics/high-blood-pressure/the-facts-about-high-blood-pressure/all-about-heart-rate-pulse
+Accessed July 12, 2026.
+
+Used in bpm_gui.py for the adult resting-heart-rate reference bands:
+  Low: below 60 BPM
+  Typical: 60-100 BPM
+  High: above 100 BPM
+
+The source states that a normal resting heart rate is 60-100 BPM when a
+person is sitting or lying down, calm, and feeling well. These ranges are
+general adult resting references and are not diagnostic. Heart rate varies
+with activity, fitness, medication, health, stress, and other factors; for
+example, some trained athletes have resting rates below 60 BPM.
