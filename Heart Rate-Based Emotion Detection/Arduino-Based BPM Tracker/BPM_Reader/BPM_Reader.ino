@@ -17,5 +17,5 @@ void loop() {
   Serial.print(",");
   Serial.println(pulseValue);
 
-  delay(10);  // Approximately 100 samples per second
+  delay(5);  // Approximately 100 samples per second
 }

@@ -20,6 +20,17 @@ UPDATE_INTERVAL_MS = 50
 DEFAULT_BAUD_RATE = 115200
 
 
+def classify_bpm_arousal(bpm: int) -> tuple[str, str]:
+    """Return a broad, non-diagnostic arousal heuristic for a resting BPM."""
+    if bpm < 60:
+        return "Low activation / possibly calm", "#3569a8"
+    if bpm <= 80:
+        return "Typical activation / emotion unclear", "#16803a"
+    if bpm <= 100:
+        return "Elevated activation / possibly active, stressed, or excited", "#b36b00"
+    return "High activation / possibly stressed or excited", "#b3261e"
+
+
 class HeartRateMonitorApp:
     """Build and coordinate the GUI without implementing signal processing."""
 
@@ -105,6 +116,12 @@ class HeartRateMonitorApp:
             font=("Arial", 11),
         )
         self.health_label.pack(side="left", padx=10)
+        self.emotion_label = ttk.Label(
+            frame,
+            text="Emotion estimate: waiting for BPM (heuristic only)",
+            font=("Arial", 11, "bold"),
+        )
+        self.emotion_label.pack(side="left", padx=10)
         self.signal_label = ttk.Label(frame, text="Signal: 0")
         self.signal_label.pack(side="right", padx=12)
         self.threshold_label = ttk.Label(frame, text="Threshold: 0.0")
@@ -148,6 +165,56 @@ class HeartRateMonitorApp:
         )
         ttk.Button(frame, text="Restore defaults", command=self.restore_defaults).grid(
             row=len(self.setting_vars) + 1, column=0, columnspan=2, sticky="ew"
+        )
+
+        legend_row = len(self.setting_vars) + 2
+        ttk.Separator(frame, orient="horizontal").grid(
+            row=legend_row, column=0, columnspan=2, sticky="ew", pady=(16, 10)
+        )
+        ttk.Label(frame, text="Emotion thresholds", font=("Arial", 12, "bold")).grid(
+            row=legend_row + 1, column=0, columnspan=2, sticky="w"
+        )
+        threshold_descriptions = (
+            ("Below 60 BPM", "Low activation / possibly calm", "#3569a8"),
+            ("60–80 BPM", "Typical activation / emotion unclear", "#16803a"),
+            (
+                "81–100 BPM",
+                "Elevated / active, stressed, or excited",
+                "#b36b00",
+            ),
+            ("Above 100 BPM", "High activation / stressed or excited", "#b3261e"),
+        )
+        for offset, (bpm_range, emotion, color) in enumerate(
+            threshold_descriptions, start=2
+        ):
+            ttk.Label(frame, text=bpm_range, foreground=color).grid(
+                row=legend_row + offset, column=0, sticky="nw", pady=3
+            )
+            ttk.Label(
+                frame,
+                text=emotion,
+                foreground=color,
+                wraplength=220,
+                justify="left",
+            ).grid(
+                row=legend_row + offset,
+                column=1,
+                sticky="nw",
+                padx=(12, 0),
+                pady=3,
+            )
+        ttk.Label(
+            frame,
+            text="Heuristic only—BPM alone cannot identify a specific emotion.",
+            wraplength=330,
+            justify="left",
+            font=("Arial", 9, "italic"),
+        ).grid(
+            row=legend_row + len(threshold_descriptions) + 2,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            pady=(8, 0),
         )
 
     def refresh_ports(self) -> None:
@@ -232,9 +299,18 @@ class HeartRateMonitorApp:
                 resting_band = "High resting range (>100 BPM)"
                 color = "#b3261e"
             self.health_label.config(text=resting_band, foreground=color)
+            emotion_text, emotion_color = classify_bpm_arousal(state.current_bpm)
+            self.emotion_label.config(
+                text=f"Emotion estimate: {emotion_text} (heuristic only)",
+                foreground=emotion_color,
+            )
         else:
             self.health_label.config(
                 text="Adult resting reference: Low <60 | Typical 60–100 | High >100 BPM",
+                foreground="",
+            )
+            self.emotion_label.config(
+                text="Emotion estimate: waiting for BPM (heuristic only)",
                 foreground="",
             )
         if self.reader.is_open:

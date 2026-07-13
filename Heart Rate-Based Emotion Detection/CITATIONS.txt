@@ -1,16 +1,74 @@
 HEALTHY RESTING HEART-RATE REFERENCE
 
-American Heart Association. "All About Heart Rate (Pulse)."
-https://www.heart.org/en/health-topics/high-blood-pressure/the-facts-about-high-blood-pressure/all-about-heart-rate-pulse
-Accessed July 12, 2026.
+Maake, Mohale Gift, Kotsedi Daniel Monyeki, and Machoene Derrick Sekgala.
+"The Relationship Between Resting Heart Rate and Cardiovascular Risk Factors
+Among Adults Aged 18 Years and Above in the Rural Ellisras Population:
+Ellisras Longitudinal Study." Journal of Cardiovascular Development and
+Disease 12, no. 11 (2025): 428.
+https://doi.org/10.3390/jcdd12110428
 
 Used in bpm_gui.py for the adult resting-heart-rate reference bands:
   Low: below 60 BPM
   Typical: 60-100 BPM
   High: above 100 BPM
 
-The source states that a normal resting heart rate is 60-100 BPM when a
-person is sitting or lying down, calm, and feeling well. These ranges are
-general adult resting references and are not diagnostic. Heart rate varies
-with activity, fitness, medication, health, stress, and other factors; for
-example, some trained athletes have resting rates below 60 BPM.
+The peer-reviewed study categorizes adult resting heart rate as bradycardia
+when below 60 BPM, normal from 60-100 BPM, and tachycardia when above 100 BPM.
+Heart-rate measurements were taken after participants had been seated for at
+least five minutes. The study also reports associations between resting heart
+rate and several cardiovascular and metabolic factors. In bpm_gui.py, these
+categories are used only as general reference bands and not as medical
+diagnoses.
+
+
+HEART-RATE-BASED EMOTION/AROUSAL HEURISTIC
+
+Measurement applied in bpm_gui.py:
+  Below 60 BPM: Low activation / possibly calm
+  60-80 BPM: Typical activation / emotion unclear
+  81-100 BPM: Elevated activation / possibly active, stressed, or excited
+  Above 100 BPM: High activation / possibly stressed or excited
+
+Important limitation:
+
+These exact BPM boundaries are transparent project heuristics built around the
+adult resting-heart-rate bands above; they are not clinically or universally
+validated emotion thresholds. Heart rate reflects physiological arousal and
+can change with emotion, but it is also affected by exercise, posture,
+medication, fitness, illness, temperature, and individual baseline. Different
+emotions can produce overlapping cardiac responses. The GUI therefore uses
+"possibly" and "emotion unclear" and must not be treated as a diagnostic or a
+reliable detector of a specific emotion. A personalized baseline, heart-rate
+variability, and additional signals would be needed for stronger inference.
+
+Academic support for heart rate as an emotion-related signal:
+
+1. Kreibig, Sylvia D. "Autonomic Nervous System Activity in Emotion: A
+   Review." Biological Psychology 84, no. 3 (2010): 394-421.
+   https://doi.org/10.1016/j.biopsycho.2010.03.010
+
+   Used for: reviewing emotion-related autonomic patterns, including changes
+   in heart rate, while showing that responses vary across emotions and study
+   conditions. It supports broad arousal-related interpretation, not the exact
+   BPM cutoffs used by this project.
+
+2. Rainville, Pierre, Antoine Bechara, Nasir Naqvi, and Antonio R. Damasio.
+   "Basic Emotions Are Associated with Distinct Patterns of Cardiorespiratory
+   Activity." International Journal of Psychophysiology 61, no. 1 (2006):
+   5-18.
+   https://doi.org/10.1016/j.ijpsycho.2005.10.024
+
+   Used for: experimental evidence that induced basic emotions are associated
+   with differing heart-rate and respiratory patterns. The study supports
+   cardiac activity as an emotion-related feature but does not establish fixed
+   universal BPM thresholds for individual emotions.
+
+3. Sayed Ismail, Sharifah Noor Masidayu, Nor Azlina Ab. Aziz, Siti Zainab
+   Ibrahim, and Mohd Saberi Mohamad. "A Systematic Review of Emotion
+   Recognition Using Cardio-Based Signals." ICT Express 10, no. 1 (2024):
+   156-183.
+   https://doi.org/10.1016/j.icte.2023.09.001
+
+   Used for: documenting the use of ECG and PPG cardiac signals in automatic
+   emotion-recognition research and the importance of signal features and
+   classification methods beyond a single instantaneous BPM value.
