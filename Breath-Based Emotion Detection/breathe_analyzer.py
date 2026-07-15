@@ -1,8 +1,8 @@
-"""Live decibel analysis and emotion-guessing logic.
+"""Live decibel analysis and signal-label estimation logic.
 
 This file contains the non-GUI part of the app. It receives small chunks of
 microphone audio, measures how loud the voice-frequency range is, and converts
-each live decibel measurement into a simple emotion estimate.
+each live decibel measurement into a simple signal estimate.
 """
 
 from __future__ import annotations
@@ -41,8 +41,8 @@ DECIBEL_MAX = 0
 
 
 @dataclass
-class EmotionEstimate:
-    """A live decibel-based prediction result that the GUI can display."""
+class SignalEstimate:
+    """A live decibel-based estimate result that the GUI can display."""
 
     label: str
     message: str
@@ -51,7 +51,7 @@ class EmotionEstimate:
 
 
 class BreathingAnalyzer:
-    """Store microphone loudness and estimate emotion from the latest reading."""
+    """Store microphone loudness and estimate a label from the latest reading."""
 
     def __init__(self) -> None:
         # Deques let us efficiently add new readings at the end and remove old
@@ -75,7 +75,7 @@ class BreathingAnalyzer:
         )
         if new_boost != self.sensitivity_boost_db:
             # Old readings were measured with a different boost, so mixing them
-            # with new readings would make the graph and prediction misleading.
+            # with new readings would make the graph and estimate misleading.
             self.sensitivity_boost_db = new_boost
             self.clear()
         return self.sensitivity_boost_db
@@ -105,19 +105,19 @@ class BreathingAnalyzer:
         while self.live_db_history and self.live_db_history[0][0] < cutoff:
             self.live_db_history.popleft()
 
-    def analyze(self) -> EmotionEstimate:
+    def analyze(self) -> SignalEstimate:
         """Return the best current estimate without modifying collected audio."""
         live_db = self.current_live_db()
 
         if live_db is None:
             # No microphone samples have reached the analyzer yet.
-            return EmotionEstimate(
+            return SignalEstimate(
                 "Waiting for audio",
                 "Select a microphone, press Start, and make sound near the microphone.",
             )
 
         label, message, category = classify_decibel(live_db)
-        return EmotionEstimate(label, message, category, live_db)
+        return SignalEstimate(label, message, category, live_db)
 
     def current_live_db(self) -> float | None:
         """Return the newest adjusted dBFS value, or ``None`` before audio starts."""
@@ -201,7 +201,7 @@ def rms(samples: np.ndarray) -> float:
 
 
 def classify_decibel(decibel: float) -> tuple[str, str, str]:
-    """Map a dBFS value to a broad display label and category."""
+    """Map a dBFS value to a broad signal-level label and category."""
     threshold_db = round(decibel, 6)
 
     if threshold_db < -55:
@@ -213,20 +213,20 @@ def classify_decibel(decibel: float) -> tuple[str, str, str]:
 
     if threshold_db < -42:
         return (
-            "Likely calm",
-            "The live decibel level is quiet.",
-            "calm",
+            "Low signal level",
+            "The live decibel level is low.",
+            "low",
         )
 
     if threshold_db < -30:
         return (
-            "Possibly focused or active",
+            "Moderate signal level",
             "The live decibel level is moderate.",
-            "focused",
+            "moderate",
         )
 
     return (
-        "Possibly stressed or excited",
+        "High signal level",
         "The live decibel level is loud.",
-        "stressed",
+        "high",
     )
