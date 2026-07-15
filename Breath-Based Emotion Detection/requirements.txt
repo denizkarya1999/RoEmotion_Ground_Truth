@@ -1,4 +1,4 @@
-# Python packages used by app.py.
+# Python packages used by run.py.
 numpy>=1.24
 sounddevice>=0.4.6
 

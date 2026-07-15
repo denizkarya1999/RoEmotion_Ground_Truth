@@ -9,22 +9,22 @@ from __future__ import annotations
 
 import queue
 import tkinter as tk
+from datetime import datetime
+from pathlib import Path
 from tkinter import messagebox, ttk
 
 import numpy as np
 
 from breathe_analyzer import (
-    DECIBEL_BANDS,
     DECIBEL_MAX,
     DECIBEL_MIN,
-    DECIBEL_THRESHOLDS,
     HISTORY_SECONDS,
-    PREDICTION_WINDOW_SECONDS,
     SENSITIVITY_BOOST_MAX_DB,
     SENSITIVITY_BOOST_MIN_DB,
     BreathingAnalyzer,
     EmotionEstimate,
 )
+from rate_recorder import TxtRateRecorder
 
 
 # Fallback audio settings used when the selected device does not provide better
@@ -36,34 +36,6 @@ BLOCK_SIZE = 1024
 RIGHT_AXIS_WIDTH = 18
 TEXT_SAFE_MARGIN = 10
 MIN_READABLE_WIDTH = 460
-
-# Colors used for the background bands behind the live graph.
-THRESHOLD_COLORS = {
-    "unknown": "#334155",
-    "calm": "#113f67",
-    "focused": "#5a3e09",
-    "stressed": "#5a1726",
-}
-
-# Compact labels fit better inside the colored graph bands.
-SHORT_BAND_LABELS = {
-    "very quiet / unclear": "UNCLEAR",
-    "quiet / calm": "CALM",
-    "moderate / active": "FOCUS",
-    "loud / stressed": "STRESS",
-}
-
-# The threshold lines and labels make the decibel categories visible.
-THRESHOLD_LINE_COLORS = {
-    -55: "#38bdf8",
-    -42: "#fbbf24",
-    -30: "#fb7185",
-}
-THRESHOLD_EMOTION_LABELS = {
-    -55: "-55 calm",
-    -42: "-42 active",
-    -30: "-30 stress",
-}
 
 
 class BreathingEmotionGUI(ttk.Frame):
@@ -82,6 +54,15 @@ class BreathingEmotionGUI(ttk.Frame):
         self.audio_stream = None
         self.stream_warning = ""
         self.current_sample_rate = DEFAULT_SAMPLE_RATE
+        self.decibel_recorder = TxtRateRecorder(
+            Path(__file__).resolve().parent / "recordings",
+            "decibel_levels",
+            (
+                "recorded_at",
+                "stream_timestamp_seconds",
+                "decibel_dbfs",
+            ),
+        )
 
         self._create_variables()
         self.grid(sticky="nsew")
@@ -99,10 +80,6 @@ class BreathingEmotionGUI(ttk.Frame):
         self.emotion_var = tk.StringVar()
         self.message_var = tk.StringVar()
         self.live_db_var = tk.StringVar(value="-- dBFS")
-        self.average_db_var = tk.StringVar(value="-- dBFS")
-        self.band_var = tk.StringVar(value="--")
-        self.window_var = tk.StringVar(value=f"0/{PREDICTION_WINDOW_SECONDS}s")
-        self.confidence_var = tk.StringVar(value="0%")
         self.sensitivity_value_var = tk.DoubleVar(value=SENSITIVITY_BOOST_MAX_DB)
         self.sensitivity_boost_var = tk.StringVar(value="")
         self.status_var = tk.StringVar(value="Microphone stopped")
@@ -126,7 +103,7 @@ class BreathingEmotionGUI(ttk.Frame):
         )
         ttk.Label(
             self,
-            text="32-second voice-band decibel rules from microphone audio. Not a diagnosis.",
+            text="Live microphone decibel estimates with automatic dBFS recording. Not a diagnosis.",
         ).grid(row=1, column=0, sticky="w", pady=(4, 14))
 
         # Audio controls: choose a microphone, start/stop recording, clear data,
@@ -184,16 +161,10 @@ class BreathingEmotionGUI(ttk.Frame):
 
         metrics = ttk.Frame(result)
         metrics.grid(row=2, column=0, sticky="ew")
-        for column in range(5):
-            metrics.columnconfigure(column, weight=1)
+        metrics.columnconfigure(0, weight=1)
         self._metric(metrics, "Live voice dBFS", self.live_db_var, 0)
-        self._metric(metrics, "Average dB Per Emotion", self.average_db_var, 1)
-        self._metric(metrics, "Decibel band", self.band_var, 2)
-        self._metric(metrics, "Next window", self.window_var, 3)
-        self._metric(metrics, "Confidence", self.confidence_var, 4)
 
-        # Canvas graph: drawn manually so threshold bands, live points, and
-        # average points can share the same decibel scale.
+        # Canvas graph: live points share one decibel scale.
         trace_panel = ttk.LabelFrame(self, text="Decibel graph", padding=12)
         trace_panel.grid(row=4, column=0, sticky="nsew", pady=(16, 0))
         trace_panel.columnconfigure(0, weight=1)
@@ -318,26 +289,46 @@ class BreathingEmotionGUI(ttk.Frame):
             return
 
         self.analyzer.clear()
+        try:
+            log_path = self.decibel_recorder.start()
+            log_message = f"; decibel log: {log_path.name}"
+        except OSError as exc:
+            log_message = f"; decibel log unavailable: {exc}"
         # Lock the microphone selector while recording so the stream and selected
         # device cannot get out of sync.
         self.start_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
         self.mic_box.configure(state="disabled")
         self.status_var.set(
-            f"Recording: {device_name} at {self.current_sample_rate} Hz"
+            f"Recording: {device_name} at {self.current_sample_rate} Hz{log_message}"
         )
         self.show_estimate(self.analyzer.analyze())
         self.draw_sound_trace()
 
     def stop_audio(self) -> None:
         """Stop recording and re-enable microphone selection."""
+        was_recording = self.audio_stream is not None
         close_stream(self.audio_stream)
         self.audio_stream = None
+        updated = self._drain_audio_queue()
+        saved_path = (
+            self.decibel_recorder.path
+            if self.decibel_recorder.is_recording
+            else None
+        )
+        self.decibel_recorder.stop()
+
+        if updated:
+            self.show_estimate(self.analyzer.analyze())
+            self.draw_sound_trace()
 
         self.start_button.configure(state="normal" if self.microphones else "disabled")
         self.stop_button.configure(state="disabled")
         self.mic_box.configure(state="readonly")
-        self.status_var.set("Microphone stopped")
+        if was_recording and saved_path is not None:
+            self.status_var.set(f"Microphone stopped; decibels saved to {saved_path}")
+        else:
+            self.status_var.set("Microphone stopped")
 
     def clear(self) -> None:
         """Clear collected samples and redraw the empty prediction state."""
@@ -348,7 +339,7 @@ class BreathingEmotionGUI(ttk.Frame):
         self.draw_sound_trace()
 
     def set_sensitivity_from_slider(self, value: str | float) -> None:
-        """Handle slider movement and restart the current prediction window."""
+        """Handle slider movement and clear readings made with the old boost."""
         current_boost = int(round(float(value)))
         self.sensitivity_value_var.set(current_boost)
         self._update_sensitivity_label(current_boost)
@@ -365,8 +356,7 @@ class BreathingEmotionGUI(ttk.Frame):
         else:
             percent = sensitivity_boost_percent(current_boost)
             self.status_var.set(
-                f"Sensitivity boost set to {percent}% (+{current_boost} dB); "
-                "window restarted"
+                f"Sensitivity boost set to {percent}% (+{current_boost} dB)"
             )
 
         self.show_estimate(self.analyzer.analyze())
@@ -386,15 +376,7 @@ class BreathingEmotionGUI(ttk.Frame):
 
     def poll_audio(self) -> None:
         """Move queued microphone blocks into the analyzer on Tkinter's thread."""
-        updated = False
-        while not self.audio_queue.empty():
-            timestamp, audio = self.audio_queue.get_nowait()
-            self.analyzer.add_audio_block(
-                audio,
-                timestamp=timestamp,
-                sample_rate=self.current_sample_rate,
-            )
-            updated = True
+        updated = self._drain_audio_queue()
 
         if updated:
             self.show_estimate(self.analyzer.analyze())
@@ -408,20 +390,45 @@ class BreathingEmotionGUI(ttk.Frame):
         # second Tkinter thread.
         self.after(150, self.poll_audio)
 
+    def _drain_audio_queue(self) -> bool:
+        """Process all queued microphone blocks and report whether data changed."""
+        updated = False
+        while not self.audio_queue.empty():
+            timestamp, audio = self.audio_queue.get_nowait()
+            self.analyzer.add_audio_block(
+                audio,
+                timestamp=timestamp,
+                sample_rate=self.current_sample_rate,
+            )
+            self._record_decibel(timestamp)
+            updated = True
+        return updated
+
+    def _record_decibel(self, stream_timestamp: float | None) -> None:
+        """Persist one live decibel reading with wall-clock and stream timestamps."""
+        decibel = self.analyzer.current_live_db()
+        if decibel is None or not self.decibel_recorder.is_recording:
+            return
+        try:
+            recorded_at = datetime.now().astimezone().isoformat(
+                timespec="milliseconds"
+            )
+            self.decibel_recorder.record(
+                recorded_at=recorded_at,
+                stream_timestamp_seconds=(
+                    "" if stream_timestamp is None else f"{stream_timestamp:.6f}"
+                ),
+                decibel_dbfs=f"{decibel:.2f}",
+            )
+        except OSError as exc:
+            self.decibel_recorder.stop()
+            self.status_var.set(f"Decibel recording stopped: {exc}")
+
     def show_estimate(self, estimate: EmotionEstimate) -> None:
         """Copy an analyzer estimate into the visible labels."""
         self.emotion_var.set(estimate.label)
         self.message_var.set(estimate.message)
         self.live_db_var.set(format_value(estimate.volume_db, "-- dBFS", " dBFS", 1))
-        self.average_db_var.set(
-            format_value(estimate.average_db, "-- dBFS", " dBFS", 1)
-        )
-        self.band_var.set(format_category(estimate.category))
-        self.window_var.set(
-            f"{min(round(estimate.window_seconds), PREDICTION_WINDOW_SECONDS)}/"
-            f"{PREDICTION_WINDOW_SECONDS}s"
-        )
-        self.confidence_var.set(f"{round(estimate.confidence * 100)}%")
 
     def draw_sound_trace(self) -> None:
         """Redraw the decibel graph from the analyzer's current history."""
@@ -429,18 +436,15 @@ class BreathingEmotionGUI(ttk.Frame):
         width = max(self.trace_canvas.winfo_width(), 2)
         height = max(self.trace_canvas.winfo_height(), 2)
         padding = 16
-        # Leave a small strip on the right for the vertical axis and threshold
-        # labels, but keep a minimum plot width on small windows.
+        # Leave a small strip on the right for the vertical axis.
         plot_right = max(width - RIGHT_AXIS_WIDTH, padding + 80)
         plot_bottom = height - padding
         plot_top = padding
 
         estimate = self.analyzer.analyze()
-        self._draw_threshold_bands(width, height, padding, plot_right)
         self._draw_trace_grid(plot_right, plot_bottom, padding)
         live_times, live_values = self.analyzer.db_curve()
-        average_times, average_values = self.analyzer.average_db_curve()
-        if len(live_values) == 0 and len(average_values) == 0:
+        if len(live_values) == 0:
             # An empty graph should still explain what will appear once audio
             # starts.
             self.trace_canvas.create_text(
@@ -451,16 +455,13 @@ class BreathingEmotionGUI(ttk.Frame):
                 font=("TkDefaultFont", 14, "bold"),
                 width=max(plot_right - padding - 180, 220),
             )
-            self._draw_threshold_overlay(width, height, padding, plot_right, estimate)
+            self._draw_measurement_overlay(width, height, padding, plot_right, estimate)
             return
 
-        # Draw measured data first, then overlay thresholds and labels so the
-        # category markers stay readable.
+        # Draw measured data first, then overlay the current measurement labels.
         self._draw_db_series(
             live_times,
             live_values,
-            average_times,
-            average_values,
             padding,
             plot_right,
             plot_top,
@@ -478,24 +479,19 @@ class BreathingEmotionGUI(ttk.Frame):
             pad_x=4,
             pad_y=2,
         )
-        self._draw_threshold_overlay(width, height, padding, plot_right, estimate)
+        self._draw_measurement_overlay(width, height, padding, plot_right, estimate)
 
     def _draw_db_series(
         self,
         live_times: np.ndarray,
         live_values: np.ndarray,
-        average_times: np.ndarray,
-        average_values: np.ndarray,
         padding: int,
         plot_right: int,
         plot_top: int,
         plot_bottom: int,
     ) -> None:
-        """Draw live dBFS values and completed-window average points."""
-        time_sets = [
-            times for times in (live_times, average_times) if len(times) > 0
-        ]
-        latest_time = max(float(times[-1]) for times in time_sets)
+        """Draw live dBFS values."""
+        latest_time = float(live_times[-1])
         start_time = latest_time - HISTORY_SECONDS
 
         def x_for(time_value: float) -> float:
@@ -533,40 +529,6 @@ class BreathingEmotionGUI(ttk.Frame):
                 width=2,
             )
 
-        average_points: list[float] = []
-        for time_value, decibel in zip(average_times, average_values):
-            average_points.extend(
-                (
-                    float(x_for(time_value)),
-                    float(db_to_y(decibel, plot_top, plot_bottom)),
-                )
-            )
-
-        if len(average_points) >= 4:
-            # Completed-window averages update less often, so a dashed line helps
-            # separate them from the live trace.
-            self.trace_canvas.create_line(
-                *average_points,
-                fill="#fbbf24",
-                width=3,
-                dash=(6, 4),
-            )
-
-        # Always draw average points as circles so each completed 32-second
-        # prediction is easy to spot.
-        for index in range(0, len(average_points), 2):
-            x = average_points[index]
-            y = average_points[index + 1]
-            self.trace_canvas.create_oval(
-                x - 5,
-                y - 5,
-                x + 5,
-                y + 5,
-                fill="#fbbf24",
-                outline="#020617",
-                width=2,
-            )
-
     def _draw_trace_grid(self, plot_right: int, plot_bottom: int, padding: int) -> None:
         """Draw subtle horizontal guide lines behind the graph data."""
         for fraction in (0.25, 0.5, 0.75):
@@ -579,54 +541,7 @@ class BreathingEmotionGUI(ttk.Frame):
                 fill="#243042",
             )
 
-    def _draw_threshold_bands(
-        self,
-        width: int,
-        height: int,
-        padding: int,
-        plot_right: int,
-    ) -> None:
-        """Draw colored background regions for each decibel category."""
-        plot_top = padding
-        plot_bottom = height - padding
-
-        if width >= MIN_READABLE_WIDTH:
-            self._boxed_text(
-                padding + 10,
-                plot_top + 14,
-                "DECIBEL THRESHOLDS",
-                fill="#020617",
-                background="#e5e7eb",
-                font=("TkDefaultFont", 10, "bold"),
-                bounds=(padding, plot_top, plot_right, plot_bottom),
-            )
-
-        for start, end, label, category in DECIBEL_BANDS:
-            # Convert the lower/upper dBFS bounds into canvas y coordinates.
-            y1 = db_to_y(end, plot_top, plot_bottom)
-            y2 = db_to_y(start, plot_top, plot_bottom)
-            color = THRESHOLD_COLORS.get(category, "#94a3b8")
-            self.trace_canvas.create_rectangle(
-                padding,
-                y1,
-                plot_right,
-                y2,
-                fill=color,
-                outline="",
-            )
-            if width >= MIN_READABLE_WIDTH:
-                short_label = SHORT_BAND_LABELS.get(label, label.upper())
-                self._boxed_text(
-                    padding + 12,
-                    (y1 + y2) / 2,
-                    f"{short_label} {start} to {end} dBFS",
-                    fill="#cdd5df",
-                    background="#020617",
-                    font=("TkDefaultFont", 10, "bold"),
-                    bounds=(padding, plot_top, plot_right, plot_bottom),
-                )
-
-    def _draw_threshold_overlay(
+    def _draw_measurement_overlay(
         self,
         width: int,
         height: int,
@@ -634,7 +549,7 @@ class BreathingEmotionGUI(ttk.Frame):
         plot_right: int,
         estimate: EmotionEstimate | None,
     ) -> None:
-        """Draw threshold lines plus live and average markers on top of the graph."""
+        """Draw the scale plus the live marker on top of the graph."""
         axis_x = plot_right
         label_x = max(padding + 150, plot_right - 118)
         plot_top = padding
@@ -648,76 +563,6 @@ class BreathingEmotionGUI(ttk.Frame):
             fill="#f8fafc",
             width=2,
         )
-
-        for threshold in DECIBEL_THRESHOLDS:
-            # Draw a dark line underneath each colored line for contrast against
-            # the colored threshold bands.
-            y = db_to_y(threshold, plot_top, plot_bottom)
-            color = THRESHOLD_LINE_COLORS[threshold]
-            self.trace_canvas.create_line(
-                padding,
-                y,
-                plot_right,
-                y,
-                fill="#020617",
-                width=7,
-            )
-            self.trace_canvas.create_line(
-                padding,
-                y,
-                plot_right,
-                y,
-                fill=color,
-                width=4,
-            )
-            self.trace_canvas.create_line(
-                axis_x - 10,
-                y,
-                axis_x,
-                y,
-                fill=color,
-                width=4,
-            )
-            self._boxed_text(
-                label_x,
-                y,
-                THRESHOLD_EMOTION_LABELS[threshold],
-                fill="#020617",
-                background=color,
-                font=("TkDefaultFont", 10, "bold"),
-                bounds=(padding, plot_top, plot_right, plot_bottom),
-            )
-
-        if estimate is not None and estimate.average_db is not None:
-            # The average marker represents the last completed prediction window.
-            average_y = db_to_y(estimate.average_db, plot_top, plot_bottom)
-            self.trace_canvas.create_line(
-                padding,
-                average_y,
-                plot_right,
-                average_y,
-                fill="#020617",
-                width=7,
-                dash=(7, 5),
-            )
-            self.trace_canvas.create_line(
-                padding,
-                average_y,
-                plot_right,
-                average_y,
-                fill="#fbbf24",
-                width=4,
-                dash=(7, 5),
-            )
-            self._boxed_text(
-                label_x,
-                average_y - 14,
-                f"avg {estimate.average_db:.1f}",
-                fill="#020617",
-                background="#fbbf24",
-                font=("TkDefaultFont", 10, "bold"),
-                bounds=(padding, plot_top, plot_right, plot_bottom),
-            )
 
         if estimate is not None and estimate.volume_db is not None:
             # The live marker follows the most recent microphone block.
@@ -924,8 +769,8 @@ def load_sounddevice():
     except ImportError:
         return (
             None,
-            "Install sounddevice with:\n"
-            "python3 -m pip install --user --break-system-packages sounddevice",
+            "Audio packages are unavailable. Run run.py from this project so it "
+            "can use the local .venv, or install the root requirements.txt file.",
         )
     except OSError as exc:
         return (
@@ -942,10 +787,3 @@ def format_value(
     if value is None:
         return empty
     return f"{value:.{decimals}f}{suffix}"
-
-
-def format_category(category: str) -> str:
-    """Convert an internal category key into the label shown in the GUI."""
-    if category == "unknown":
-        return "--"
-    return category.title()

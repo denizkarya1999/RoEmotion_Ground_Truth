@@ -1,8 +1,8 @@
-"""Windowed decibel analysis and emotion-guessing logic.
+"""Live decibel analysis and emotion-guessing logic.
 
 This file contains the non-GUI part of the app. It receives small chunks of
 microphone audio, measures how loud the voice-frequency range is, and converts
-each completed 32-second window into a simple emotion estimate.
+each live decibel measurement into a simple emotion estimate.
 """
 
 from __future__ import annotations
@@ -10,17 +10,10 @@ from __future__ import annotations
 import math
 import time
 from collections import deque
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 import numpy as np
 
-
-# The app waits for a full 32 seconds of sound before making each prediction.
-PREDICTION_WINDOW_SECONDS = 32
-
-# A small tolerance keeps tiny timing differences from making a nearly complete
-# audio window look invalid.
-WINDOW_TOLERANCE_SECONDS = 0.5
 
 # Keep enough recent points to draw the live graph without storing audio forever.
 HISTORY_SECONDS = 45
@@ -46,55 +39,29 @@ SENSITIVITY_BOOST_MAX_DB = 30
 DECIBEL_MIN = -80
 DECIBEL_MAX = 0
 
-# Each tuple means: lower bound, upper bound, text shown on graph, category key.
-DECIBEL_BANDS = (
-    (-80, -55, "very quiet / unclear", "unknown"),
-    (-55, -42, "quiet / calm", "calm"),
-    (-42, -30, "moderate / active", "focused"),
-    (-30, 0, "loud / stressed", "stressed"),
-)
-
-# These are the visible cut lines between the broad decibel categories.
-DECIBEL_THRESHOLDS = (-55, -42, -30)
-
 
 @dataclass
 class EmotionEstimate:
-    """A complete prediction result that the GUI can display.
-
-    ``volume_db`` is the current live loudness when available. ``average_db`` is
-    only filled after a 32-second window has completed.
-    """
+    """A live decibel-based prediction result that the GUI can display."""
 
     label: str
     message: str
     category: str = "unknown"
     volume_db: float | None = None
-    average_db: float | None = None
-    window_seconds: float = 0.0
-    confidence: float = 0.0
 
 
 class BreathingAnalyzer:
-    """Stores microphone loudness and estimates emotion from 32-second windows."""
+    """Store microphone loudness and estimate emotion from the latest reading."""
 
     def __init__(self) -> None:
         # Deques let us efficiently add new readings at the end and remove old
         # readings from the front as time moves forward.
         self.live_db_history: deque[tuple[float, float]] = deque()
-        self.window_points: deque[tuple[float, float]] = deque()
-        self.average_db_history: deque[tuple[float, float]] = deque()
-        self.window_start_time: float | None = None
-        self.last_completed_estimate: EmotionEstimate | None = None
         self.sensitivity_boost_db = SENSITIVITY_BOOST_MAX_DB
 
     def clear(self) -> None:
-        """Forget collected audio points and start the next window from scratch."""
+        """Forget collected audio points."""
         self.live_db_history.clear()
-        self.window_points.clear()
-        self.average_db_history.clear()
-        self.window_start_time = None
-        self.last_completed_estimate = None
 
     def change_sensitivity_boost(self, delta_db: int) -> int:
         """Move the sensitivity boost up or down by ``delta_db``."""
@@ -130,39 +97,17 @@ class BreathingAnalyzer:
         now = time.monotonic() if timestamp is None else float(timestamp)
         adjusted_db = self.adjust_decibel(voice_db + VOICE_BAND_EXTRA_BOOST_DB)
 
-        # Store the same point in two places: one history for the live graph, and
-        # one list for the current 32-second prediction window.
+        # Store the point for the live graph and current display.
         self.live_db_history.append((now, adjusted_db))
-        if self.window_start_time is None:
-            self.window_start_time = now
-        self.window_points.append((now, adjusted_db))
-        self._complete_ready_windows(now)
 
         # Remove graph points that are too old to display.
         cutoff = now - HISTORY_SECONDS
         while self.live_db_history and self.live_db_history[0][0] < cutoff:
             self.live_db_history.popleft()
-        while self.average_db_history and self.average_db_history[0][0] < cutoff:
-            self.average_db_history.popleft()
 
     def analyze(self) -> EmotionEstimate:
         """Return the best current estimate without modifying collected audio."""
         live_db = self.current_live_db()
-        progress = self.current_window_progress()
-
-        if self.last_completed_estimate is not None:
-            # Keep showing the last completed prediction while the next window is
-            # collecting, because a new estimate is only available every 32 sec.
-            message = (
-                f"{self.last_completed_estimate.message} "
-                f"Next {PREDICTION_WINDOW_SECONDS}-second window is collecting."
-            )
-            return replace(
-                self.last_completed_estimate,
-                message=message,
-                volume_db=live_db,
-                window_seconds=progress,
-            )
 
         if live_db is None:
             # No microphone samples have reached the analyzer yet.
@@ -171,13 +116,8 @@ class BreathingAnalyzer:
                 "Select a microphone, press Start, and make sound near the microphone.",
             )
 
-        return EmotionEstimate(
-            "Listening",
-            f"Collecting a {PREDICTION_WINDOW_SECONDS}-second decibel window.",
-            volume_db=live_db,
-            window_seconds=progress,
-            confidence=min(progress / PREDICTION_WINDOW_SECONDS, 0.95),
-        )
+        label, message, category = classify_decibel(live_db)
+        return EmotionEstimate(label, message, category, live_db)
 
     def current_live_db(self) -> float | None:
         """Return the newest adjusted dBFS value, or ``None`` before audio starts."""
@@ -185,93 +125,16 @@ class BreathingAnalyzer:
             return None
         return self.live_db_history[-1][1]
 
-    def current_window_progress(self) -> float:
-        """Return how many seconds of the current prediction window are filled."""
-        if self.window_start_time is None or not self.live_db_history:
-            return 0.0
-
-        progress = self.live_db_history[-1][0] - self.window_start_time
-        return min(max(float(progress), 0.0), PREDICTION_WINDOW_SECONDS)
-
     def db_curve(self) -> tuple[np.ndarray, np.ndarray]:
         """Return live adjusted decibel points with absolute timestamps."""
         if not self.live_db_history:
             return np.array([]), np.array([])
         return absolute_points_to_arrays(list(self.live_db_history))
 
-    def average_db_curve(self) -> tuple[np.ndarray, np.ndarray]:
-        """Return completed-window average adjusted decibel points."""
-        if not self.average_db_history:
-            return np.array([]), np.array([])
-        return absolute_points_to_arrays(list(self.average_db_history))
-
     def adjust_decibel(self, decibel: float) -> float:
         """Apply the sensitivity slider and clip the result to the graph range."""
         decibel += self.sensitivity_boost_db
         return min(max(decibel, DECIBEL_MIN), DECIBEL_MAX)
-
-    def _complete_ready_windows(self, now: float) -> None:
-        """Finish every 32-second window that has enough time behind it."""
-        if self.window_start_time is None:
-            return
-
-        while now - self.window_start_time >= PREDICTION_WINDOW_SECONDS:
-            window_end = self.window_start_time + PREDICTION_WINDOW_SECONDS
-            # Keep only the points that actually belong to this completed window.
-            points = [
-                point
-                for point in self.window_points
-                if self.window_start_time <= point[0] <= window_end
-            ]
-            self.last_completed_estimate = self._estimate_completed_window(points)
-            if self.last_completed_estimate.average_db is not None:
-                self.average_db_history.append(
-                    (window_end, self.last_completed_estimate.average_db)
-                )
-
-            # Drop completed points so the next window starts cleanly.
-            while self.window_points and self.window_points[0][0] <= window_end:
-                self.window_points.popleft()
-            self.window_start_time = window_end
-
-    def _estimate_completed_window(
-        self, points: list[tuple[float, float]]
-    ) -> EmotionEstimate:
-        """Classify one completed prediction window from its decibel points."""
-        if len(points) < 10:
-            return EmotionEstimate(
-                "Sound not clear",
-                "The completed 32-second window did not contain enough audio.",
-                window_seconds=PREDICTION_WINDOW_SECONDS,
-                confidence=0.1,
-            )
-
-        times, values = absolute_points_to_arrays(points)
-        duration = float(times[-1] - times[0])
-        average_db = float(values.mean())
-        variability = float(values.std())
-
-        # A window can have many points but still be too short if the stream was
-        # interrupted. Duration catches that case.
-        if duration < PREDICTION_WINDOW_SECONDS - WINDOW_TOLERANCE_SECONDS:
-            return EmotionEstimate(
-                "Sound not clear",
-                "The completed 32-second window did not contain enough audio.",
-                average_db=average_db,
-                window_seconds=PREDICTION_WINDOW_SECONDS,
-                confidence=0.1,
-            )
-
-        label, message, category = classify_decibel(average_db, windowed=True)
-        return EmotionEstimate(
-            label=label,
-            message=message,
-            category=category,
-            volume_db=average_db,
-            average_db=average_db,
-            window_seconds=PREDICTION_WINDOW_SECONDS,
-            confidence=estimate_confidence(average_db, duration, variability),
-        )
 
 
 def absolute_points_to_arrays(
@@ -337,42 +200,33 @@ def rms(samples: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(samples), dtype=np.float64)))
 
 
-def classify_decibel(decibel: float, windowed: bool = False) -> tuple[str, str, str]:
+def classify_decibel(decibel: float) -> tuple[str, str, str]:
     """Map a dBFS value to a broad display label and category."""
-    scope = "32-second average" if windowed else "live"
     threshold_db = round(decibel, 6)
 
     if threshold_db < -55:
         return (
             "Sound too quiet to tell",
-            f"The {scope} decibel level is very low.",
+            "The live decibel level is very low.",
             "unknown",
         )
 
     if threshold_db < -42:
         return (
             "Likely calm",
-            f"The {scope} decibel level is quiet.",
+            "The live decibel level is quiet.",
             "calm",
         )
 
     if threshold_db < -30:
         return (
             "Possibly focused or active",
-            f"The {scope} decibel level is moderate.",
+            "The live decibel level is moderate.",
             "focused",
         )
 
     return (
         "Possibly stressed or excited",
-        f"The {scope} decibel level is loud.",
+        "The live decibel level is loud.",
         "stressed",
     )
-
-
-def estimate_confidence(decibel: float, duration: float, variability: float) -> float:
-    """Combine duration, loudness, and steadiness into a simple 0-to-1 score."""
-    duration_score = min(duration / PREDICTION_WINDOW_SECONDS, 1)
-    loudness_score = min(max((decibel + 60) / 35, 0), 1)
-    stability_score = 1 - min(variability / 18, 0.55)
-    return 0.40 * duration_score + 0.35 * loudness_score + 0.25 * stability_score
