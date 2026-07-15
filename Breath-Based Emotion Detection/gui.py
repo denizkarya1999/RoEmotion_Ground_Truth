@@ -1,7 +1,7 @@
-"""Tkinter GUI for sound-only breathing emotion prediction.
+"""Tkinter GUI for sound-only breathing signal estimation.
 
 This file owns the user interface: microphone selection, start/stop controls,
-prediction labels, and the live decibel graph. The signal-processing logic lives
+estimate labels, and the live decibel graph. The signal-processing logic lives
 in ``breathe_analyzer.py`` so the GUI code can focus on display and interaction.
 """
 
@@ -22,7 +22,7 @@ from breathe_analyzer import (
     SENSITIVITY_BOOST_MAX_DB,
     SENSITIVITY_BOOST_MIN_DB,
     BreathingAnalyzer,
-    EmotionEstimate,
+    SignalEstimate,
 )
 from rate_recorder import TxtRateRecorder
 
@@ -38,8 +38,8 @@ TEXT_SAFE_MARGIN = 10
 MIN_READABLE_WIDTH = 460
 
 
-class BreathingEmotionGUI(ttk.Frame):
-    """Microphone controls, prediction display, and live sound trace."""
+class BreathingSignalGUI(ttk.Frame):
+    """Microphone controls, estimate display, and live sound trace."""
 
     def __init__(self, master: tk.Tk) -> None:
         super().__init__(master, padding=18)
@@ -77,7 +77,7 @@ class BreathingEmotionGUI(ttk.Frame):
     def _create_variables(self) -> None:
         """Create Tkinter variables that keep widgets and code in sync."""
         self.mic_var = tk.StringVar()
-        self.emotion_var = tk.StringVar()
+        self.estimate_var = tk.StringVar()
         self.message_var = tk.StringVar()
         self.live_db_var = tk.StringVar(value="-- dBFS")
         self.sensitivity_value_var = tk.DoubleVar(value=SENSITIVITY_BOOST_MAX_DB)
@@ -90,7 +90,7 @@ class BreathingEmotionGUI(ttk.Frame):
         style = ttk.Style(self)
         style.theme_use("clam")
         style.configure("Title.TLabel", font=("TkDefaultFont", 22, "bold"))
-        style.configure("Prediction.TLabel", font=("TkDefaultFont", 18, "bold"))
+        style.configure("Estimate.TLabel", font=("TkDefaultFont", 18, "bold"))
         style.configure("Metric.TLabel", font=("TkDefaultFont", 13))
 
         self.columnconfigure(0, weight=1)
@@ -98,7 +98,7 @@ class BreathingEmotionGUI(ttk.Frame):
 
         # Header text gives the app name and reminds users that this is only a
         # rough rule-based signal, not a medical or psychological diagnosis.
-        ttk.Label(self, text="Breath-based Emotion Detection", style="Title.TLabel").grid(
+        ttk.Label(self, text="Breath-based Signal Monitor", style="Title.TLabel").grid(
             row=0, column=0, sticky="w"
         )
         ttk.Label(
@@ -148,11 +148,11 @@ class BreathingEmotionGUI(ttk.Frame):
             row=2, column=3, sticky="w", pady=(10, 0)
         )
 
-        # Prediction panel: all values here come from one EmotionEstimate object.
-        result = ttk.LabelFrame(self, text="Prediction", padding=14)
+        # Estimate panel: all values here come from one SignalEstimate object.
+        result = ttk.LabelFrame(self, text="Live estimate", padding=14)
         result.grid(row=3, column=0, sticky="ew", pady=(16, 0))
         result.columnconfigure(0, weight=1)
-        ttk.Label(result, textvariable=self.emotion_var, style="Prediction.TLabel").grid(
+        ttk.Label(result, textvariable=self.estimate_var, style="Estimate.TLabel").grid(
             row=0, column=0, sticky="w"
         )
         ttk.Label(result, textvariable=self.message_var, wraplength=760).grid(
@@ -180,7 +180,7 @@ class BreathingEmotionGUI(ttk.Frame):
 
     @staticmethod
     def _metric(parent: ttk.Frame, label: str, value: tk.StringVar, column: int) -> None:
-        """Add one labeled number to the prediction metrics row."""
+        """Add one labeled number to the estimate metrics row."""
         block = ttk.Frame(parent)
         block.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 10, 0))
         ttk.Label(block, text=label).grid(row=0, column=0, sticky="w")
@@ -331,7 +331,7 @@ class BreathingEmotionGUI(ttk.Frame):
             self.status_var.set("Microphone stopped")
 
     def clear(self) -> None:
-        """Clear collected samples and redraw the empty prediction state."""
+        """Clear collected samples and redraw the empty estimate state."""
         self.analyzer.clear()
         while not self.audio_queue.empty():
             self.audio_queue.get_nowait()
@@ -424,9 +424,9 @@ class BreathingEmotionGUI(ttk.Frame):
             self.decibel_recorder.stop()
             self.status_var.set(f"Decibel recording stopped: {exc}")
 
-    def show_estimate(self, estimate: EmotionEstimate) -> None:
+    def show_estimate(self, estimate: SignalEstimate) -> None:
         """Copy an analyzer estimate into the visible labels."""
-        self.emotion_var.set(estimate.label)
+        self.estimate_var.set(estimate.label)
         self.message_var.set(estimate.message)
         self.live_db_var.set(format_value(estimate.volume_db, "-- dBFS", " dBFS", 1))
 
@@ -547,7 +547,7 @@ class BreathingEmotionGUI(ttk.Frame):
         height: int,
         padding: int,
         plot_right: int,
-        estimate: EmotionEstimate | None,
+        estimate: SignalEstimate | None,
     ) -> None:
         """Draw the scale plus the live marker on top of the graph."""
         axis_x = plot_right
